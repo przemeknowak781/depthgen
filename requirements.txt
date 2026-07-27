@@ -1,0 +1,13 @@
+# torch/torchvision instaluje setup.bat (wariant CUDA lub CPU)
+transformers>=4.45
+accelerate
+safetensors
+huggingface_hub
+fastapi
+uvicorn[standard]
+python-multipart
+pillow
+opencv-python-headless
+numpy
+scipy
+trimesh

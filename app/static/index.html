@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DepthGen — płaskorzeźby 3D lokalnie</title>
+<link rel="stylesheet" href="/static/css/style.css">
+<script type="importmap">
+{ "imports": {
+  "three": "/static/vendor/three.module.js",
+  "three/addons/": "/static/vendor/addons/"
+} }
+</script>
+</head>
+<body>
+<header>
+  <div class="brand"><span class="dot"></span> DepthGen</div>
+  <div class="hw" id="hw">…</div>
+  <div class="spacer"></div>
+  <div class="stats" id="stats">—</div>
+</header>
+
+<main>
+  <aside id="panel">
+    <div class="presets">
+      <select id="preset">
+        <option value="">— preset parametrów —</option>
+        <option value="portret">Portret / popiersie</option>
+        <option value="detal">Maksymalny detal</option>
+        <option value="logo">Logo / grafika płaska</option>
+        <option value="krajobraz">Krajobraz</option>
+        <option value="medalion">Medalion owalny</option>
+        <option value="wycinanka">Wycinanka PNG (sama sylwetka)</option>
+        <option value="litofania">Litofania (cienka płytka)</option>
+      </select>
+      <button id="reset" title="Przywróć ustawienia domyślne">↺</button>
+    </div>
+    <section class="grp open">
+      <h3>1 · Obraz źródłowy</h3>
+      <div class="body">
+        <div id="drop" class="drop">
+          <input type="file" id="file" accept="image/*" hidden>
+          <img id="thumb" alt="">
+          <span id="dropText">Upuść obraz lub kliknij</span>
+        </div>
+        <label>Model głębi
+          <select id="model"></select>
+        </label>
+        <div class="row"><label>Rozdz. sieci <b id="v_input_size">700</b>
+          <input type="range" id="input_size" min="256" max="1288" step="14" value="700"></div>
+        </label>
+        <label>Przebieg kafelkowy (więcej detalu)
+          <select id="tiles">
+            <option value="1">wyłączony — 1 przebieg</option>
+            <option value="2">2×2 kafle</option>
+            <option value="3">3×3 kafle</option>
+            <option value="4">4×4 kafle (wolne)</option>
+          </select>
+        </label>
+        <div class="row"><label>Siła detalu z kafli <b id="v_tile_blend">0.70</b>
+          <input type="range" id="tile_blend" min="0" max="1" step="0.05" value="0.7"></label></div>
+        <button id="gen" class="primary" disabled>Generuj mapę głębi</button>
+        <div id="prog" class="prog"></div>
+        <div class="maps">
+          <div><span>obraz</span><img id="mapSrc" alt=""></div>
+          <div><span>wysokość</span><img id="mapDepth" alt=""></div>
+        </div>
+        <label class="mini">Własna mapa głębi (opcjonalnie)
+          <input type="file" id="depthFile" accept="image/*">
+        </label>
+      </div>
+    </section>
+
+    <section class="grp open">
+      <h3>2 · Głębia</h3>
+      <div class="body">
+        <label class="chk"><input type="checkbox" id="invert"> Odwróć (dalekie = wysokie)</label>
+        <div class="row"><label>Odcięcie dołu <b id="v_clip_low">0.5</b>
+          <input type="range" id="clip_low" min="0" max="20" step="0.1" value="0.5"></label></div>
+        <div class="row"><label>Odcięcie góry <b id="v_clip_high">99.5</b>
+          <input type="range" id="clip_high" min="80" max="100" step="0.1" value="99.5"></label></div>
+        <div class="row"><label>Gamma <b id="v_gamma">1.00</b>
+          <input type="range" id="gamma" min="0.2" max="3" step="0.02" value="1"></label></div>
+        <div class="row"><label>Kontrast (krzywa S) <b id="v_contrast">0.00</b>
+          <input type="range" id="contrast" min="-1" max="1" step="0.02" value="0"></label></div>
+      </div>
+    </section>
+
+    <section class="grp open">
+      <h3>3 · Detal i wygładzanie</h3>
+      <div class="body">
+        <label>Odszumianie medianowe (kolce, artefakty)
+          <select id="median">
+            <option value="0">wyłączone</option>
+            <option value="3">3 px</option>
+            <option value="5">5 px</option>
+          </select>
+        </label>
+        <div class="row"><label>Wygładzanie z zachowaniem krawędzi <b id="v_bilateral">0</b>
+          <input type="range" id="bilateral" min="0" max="15" step="1" value="0"></label></div>
+        <div class="row"><label>Rozmycie (szum) <b id="v_smooth">0.0</b>
+          <input type="range" id="smooth" min="0" max="8" step="0.1" value="0"></label></div>
+        <div class="row"><label>Wyostrzenie reliefu <b id="v_detail">0.35</b>
+          <input type="range" id="detail" min="0" max="2" step="0.05" value="0.35"></label></div>
+        <div class="row"><label>Promień wyostrzenia <b id="v_detail_radius">6.0</b>
+          <input type="range" id="detail_radius" min="0.5" max="40" step="0.5" value="6"></label></div>
+        <div class="row"><label>Ochrona krawędzi sylwetki <b id="v_detail_guard">0.60</b>
+          <input type="range" id="detail_guard" min="0" max="1" step="0.02" value="0.6"></label></div>
+        <div class="row"><label>Limit amplitudy detalu <b id="v_detail_clamp">0.080</b>
+          <input type="range" id="detail_clamp" min="0.005" max="0.4" step="0.005" value="0.08"></label></div>
+        <div class="row"><label>Mikrodetal z obrazu (faktura) <b id="v_micro">0.00</b>
+          <input type="range" id="micro" min="0" max="1" step="0.01" value="0"></label></div>
+        <div class="row"><label>Promień mikrodetalu <b id="v_micro_radius">2.5</b>
+          <input type="range" id="micro_radius" min="0.5" max="12" step="0.1" value="2.5"></label></div>
+      </div>
+    </section>
+
+    <section class="grp">
+      <h3>4 · Tło i kształt</h3>
+      <div class="body">
+        <div class="row"><label>Próg tła <b id="v_floor">0.00</b>
+          <input type="range" id="floor" min="0" max="0.9" step="0.01" value="0"></label></div>
+        <div class="row"><label>Miękkość progu <b id="v_floor_soft">0.05</b>
+          <input type="range" id="floor_soft" min="0.005" max="0.4" step="0.005" value="0.05"></label></div>
+        <div class="row"><label>Zejście przy krawędziach <b id="v_edge_falloff">0.00</b>
+          <input type="range" id="edge_falloff" min="0" max="0.5" step="0.01" value="0"></label></div>
+        <label>Kształt płyty
+          <select id="shape">
+            <option value="rect">prostokąt</option>
+            <option value="rounded">zaokrąglone rogi</option>
+            <option value="ellipse">owal / medalion</option>
+          </select>
+        </label>
+        <div class="row"><label>Promień narożnika <b id="v_corner">0.15</b>
+          <input type="range" id="corner" min="0.02" max="1" step="0.01" value="0.15"></label></div>
+        <div class="row"><label>Margines <b id="v_margin">0.00</b>
+          <input type="range" id="margin" min="0" max="0.4" step="0.01" value="0"></label></div>
+        <label class="chk"><input type="checkbox" id="trim"> Przytnij bryłę do kształtu</label>
+      </div>
+    </section>
+
+    <section class="grp">
+      <h3>4b · Wycięcie sylwetki</h3>
+      <div class="body">
+        <p class="note">Odcina płaską płytę i zostawia sam relief. Wymaga włączonego
+          „Przytnij bryłę do kształtu" powyżej.</p>
+        <label class="chk"><input type="checkbox" id="alpha_cut"> Tnij po przezroczystości (kanał alfa)</label>
+        <div id="alphaInfo" class="prog"></div>
+        <div class="row"><label>Próg alfy <b id="v_alpha_threshold">0.50</b>
+          <input type="range" id="alpha_threshold" min="0.02" max="0.98" step="0.01" value="0.5"></label></div>
+        <div class="row"><label>Poszerz / zwęź sylwetkę [px] <b id="v_alpha_grow">0</b>
+          <input type="range" id="alpha_grow" min="-12" max="12" step="1" value="0"></label></div>
+        <div class="row"><label>Odetnij poniżej wysokości <b id="v_cut_level">0.00</b>
+          <input type="range" id="cut_level" min="0" max="0.9" step="0.01" value="0"></label></div>
+        <div class="row"><label>Usuń wysepki mniejsze niż [%] <b id="v_min_island">0.20</b>
+          <input type="range" id="min_island" min="0" max="3" step="0.05" value="0.2"></label></div>
+      </div>
+    </section>
+
+    <section class="grp open">
+      <h3>5 · Siatka i wymiary</h3>
+      <div class="body">
+        <div class="row"><label>Rozdzielczość podglądu <b id="v_resolution">400</b>
+          <input type="range" id="resolution" min="100" max="1200" step="20" value="400"></label></div>
+        <div class="row"><label>Szerokość [mm] <b id="v_width_mm">100</b>
+          <input type="range" id="width_mm" min="10" max="400" step="1" value="100"></label></div>
+        <div class="row"><label>Wysokość reliefu [mm] <b id="v_relief_mm">8.0</b>
+          <input type="range" id="relief_mm" min="0.2" max="60" step="0.1" value="8"></label></div>
+        <div class="row"><label>Grubość bazy [mm] <b id="v_base_mm">2.0</b>
+          <input type="range" id="base_mm" min="0" max="30" step="0.1" value="2"></label></div>
+        <label class="chk"><input type="checkbox" id="solid" checked> Zamknięta bryła (pod druk 3D)</label>
+      </div>
+    </section>
+
+    <section class="grp open">
+      <h3>6 · Eksport</h3>
+      <div class="body">
+        <div class="row"><label>Rozdzielczość eksportu <b id="v_exres">1200</b>
+          <input type="range" id="exres" min="200" max="4000" step="50" value="1200"></label></div>
+        <label>Format
+          <select id="format">
+            <option value="stl">STL (druk 3D)</option>
+            <option value="obj">OBJ</option>
+            <option value="ply">PLY</option>
+            <option value="glb">GLB</option>
+            <option value="3mf">3MF</option>
+          </select>
+        </label>
+        <button id="export" class="primary" disabled>Eksportuj siatkę</button>
+        <button id="saveDepth" disabled>Zapisz mapę wysokości (16-bit PNG)</button>
+        <div id="exInfo" class="prog"></div>
+      </div>
+    </section>
+  </aside>
+
+  <div id="stage">
+    <div id="view"></div>
+    <div class="viewbar">
+      <label class="chk"><input type="checkbox" id="wire"> siatka</label>
+      <label class="chk"><input type="checkbox" id="spin"> obrót</label>
+      <select id="matsel">
+        <option value="clay">glina</option>
+        <option value="plaster">gips</option>
+        <option value="bronze">brąz</option>
+        <option value="steel">stal</option>
+        <option value="normals">normalne</option>
+      </select>
+      <span class="sep"></span>
+      <label>światło <input type="range" id="lightrot" min="0" max="360" step="1" value="45"></label>
+      <span class="sep"></span>
+      <button id="fit">wyśrodkuj</button>
+      <button id="front">przód</button>
+      <label class="chk"><input type="checkbox" id="live" checked> podgląd live</label>
+      <button id="refresh">odśwież</button>
+    </div>
+    <div id="busy" class="busy hidden"><div class="spin"></div><span id="busyTxt">…</span></div>
+    <div id="hint" class="hint">Wgraj obraz, żeby zacząć. Wszystko liczy się lokalnie na Twoim sprzęcie.</div>
+  </div>
+</main>
+
+<script type="module" src="/static/js/app.js"></script>
+</body>
+</html>

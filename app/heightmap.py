@@ -39,6 +39,22 @@ def _smoothstep(x: np.ndarray) -> np.ndarray:
     return x * x * (3.0 - 2.0 * x)
 
 
+def _fit_ceiling(h: np.ndarray) -> np.ndarray:
+    """Sprowadza mapę pod sufit 1.0 skalowaniem, a nie obcinaniem.
+
+    Wyostrzanie potrafi wypchnąć szczyt daleko ponad zakres — przy „Wyostrzeniu reliefu”
+    1.85 i limicie amplitudy 0.135 to nawet +0.5 wysokości. Twarde obcięcie ścinało wtedy
+    najwyższy punkt w płaski krążek (na twarzy: czubek nosa). Skalowanie zachowuje kształt
+    szczytu, relief wychodzi tylko odpowiednio niższy — co i tak reguluje się wysokością
+    reliefu w mm.
+    """
+    out = np.maximum(h, 0.0)
+    peak = float(out.max())
+    if peak > 1.0:
+        out = out / peak
+    return out
+
+
 def _odd(v: float) -> int:
     k = int(max(1, round(v)))
     return k + 1 if k % 2 == 0 else k
@@ -150,17 +166,25 @@ def build(depth: np.ndarray, gray: np.ndarray | None, p: dict,
     clamp = float(q.get("detail_clamp", 0.08))
 
     def _add(hp: np.ndarray, amount: float) -> None:
+        """Dokłada warstwę detalu z uwzględnieniem zapasu do sufitu i podłogi.
+
+        Bez tego wyostrzanie wypycha najwyższe punkty daleko ponad zakres (przy sile 1.85
+        i limicie 0.135 to nawet +0.5), a sprowadzenie mapy z powrotem do 0..1 ścinało im
+        czubki w płaski krążek — na twarzy widać to jako spłaszczony nos. Teraz im bliżej
+        sufitu, tym mniej detalu da się jeszcze dołożyć, więc szczyt zostaje szczytem,
+        a wynik z definicji mieści się w zakresie.
+        """
         nonlocal h
         if guard_w is not None:
             hp = hp * guard_w
         if clamp > 0:
             hp = np.clip(hp, -clamp, clamp)
-        h = h + hp * amount
+        add = np.clip(hp * amount, -0.98, 0.98)
+        h = h + add * np.where(add > 0, 1.0 - h, h)
 
     if q["detail"] != 0:
         blur = cv2.GaussianBlur(h, (0, 0), max(0.3, float(q["detail_radius"])))
         _add(h - blur, float(q["detail"]) * 2.0)
-        h = np.clip(h, 0.0, 1.0)
 
     if q["micro"] != 0 and gray is not None:
         g = gray.astype(np.float32)
@@ -169,9 +193,12 @@ def build(depth: np.ndarray, gray: np.ndarray | None, p: dict,
         gb = cv2.GaussianBlur(g, (0, 0), max(0.3, float(q["micro_radius"])))
         _add(g - gb, float(q["micro"]) * 0.5)
 
+    # jedno wspólne sprowadzenie pod sufit po całym dokładaniu detalu
+    h = _fit_ceiling(h)
+
     g_ = float(q["gamma"])
     if abs(g_ - 1.0) > 1e-3:
-        h = np.clip(h, 0.0, 1.0) ** max(0.05, g_)
+        h = h ** max(0.05, g_)
 
     c = float(np.clip(q["contrast"], -1.0, 1.0))
     if abs(c) > 1e-3:
@@ -182,7 +209,7 @@ def build(depth: np.ndarray, gray: np.ndarray | None, p: dict,
             inv = 0.5 - np.sin(np.arcsin(np.clip(1 - 2 * hc, -1, 1)) / 3.0)
             h = hc * (1 + c) + inv * (-c)
 
-    h = np.clip(h, 0.0, 1.0)
+    h = _fit_ceiling(h)
 
     f = float(np.clip(q["floor"], 0.0, 0.99))
     if f > 0:

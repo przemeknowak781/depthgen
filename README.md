@@ -139,6 +139,10 @@ naprawdę ma relief. Podgląd przelicza się na bieżąco przy każdej zmianie p
 
 ## Wskazówki praktyczne
 
+- **Ścięty czubek nosa albo inny najwyższy punkt?** Wyostrzanie wygasza się teraz w miarę
+  zbliżania do sufitu zakresu, więc szczyty nie są już wypychane poza skalę i ścinane.
+  Jeśli mimo to czubek jest płaski, zejdź z „Odszumianiem medianowym" na 3 px — mediana
+  5 px z definicji usuwa szczyty węższe niż jej okno.
 - **Kwadraty i „robaki" na powierzchni reliefu?** To artefakty JPEG ze źródła. Podnieś
   „Usuwanie artefaktów JPEG" do ~0,5, a przy małym lub mocno zniszczonym pliku włącz
   upscaling 4×. Sam „Mikrodetal z obrazu" bez tego kroku wtłacza artefakty wprost w wysokość.
@@ -195,6 +199,14 @@ te same parametry muszą dać bit w bit tę samą siatkę.
 (nagłówek HTTP musi być latin-1, więc idzie RFC 5987), wszystkie formaty oraz skrajne
 ustawienia przycinania — te mogą zwrócić bryłę albo czytelny błąd 400, ale nigdy 500.
 Nie wymaga modelu ani GPU.
+
+```bash
+.venv\Scripts\python.exe tests\test_peaks.py
+```
+
+`test_peaks.py` — najwyższy punkt reliefu nie może być ścinany w płaski krążek.
+Mierzy wielkość płaskiego placka na czubku i porównuje go z tym samym szczytem
+policzonym bez wyostrzania.
 
 `test_cut.py` — wycinanie sylwetki na kształtach wklęsłych, z otworem i rozpadających się
 na kilka brył; sprawdza szczelność, faktyczne zniknięcie płyty i filtr wysepek.

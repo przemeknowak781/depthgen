@@ -10,6 +10,8 @@ DEFAULTS = {
     "clip_high": 99.5,      # percentyl odcięcia góry
     "gamma": 1.0,           # <1 podbija wypukłości, >1 spłaszcza
     "contrast": 0.0,        # -1..1 krzywa S
+    "highlights": 0.0,      # -1..1 — ujemne ściąga szczyty spod sufitu (koniec z idealną bielą)
+    "shadows": 0.0,         # -1..1 — dodatnie odkleja dół od idealnej czerni
     "median": 0,            # 0/3/5 px — usuwa pojedyncze piksele (kolce na włosach)
     "smooth": 0.0,          # px, gaussian (redukcja szumu)
     "bilateral": 0.0,       # px, wygładza zachowując krawędzie
@@ -39,20 +41,24 @@ def _smoothstep(x: np.ndarray) -> np.ndarray:
     return x * x * (3.0 - 2.0 * x)
 
 
-def _fit_ceiling(h: np.ndarray) -> np.ndarray:
-    """Sprowadza mapę pod sufit 1.0 skalowaniem, a nie obcinaniem.
+PIVOT = 0.5   # środek zakresu, ku któremu ściągają suwaki świateł i cieni
 
-    Wyostrzanie potrafi wypchnąć szczyt daleko ponad zakres — przy „Wyostrzeniu reliefu”
-    1.85 i limicie amplitudy 0.135 to nawet +0.5 wysokości. Twarde obcięcie ścinało wtedy
-    najwyższy punkt w płaski krążek (na twarzy: czubek nosa). Skalowanie zachowuje kształt
-    szczytu, relief wychodzi tylko odpowiednio niższy — co i tak reguluje się wysokością
-    reliefu w mm.
+
+def _tone(h: np.ndarray, highlights: float, shadows: float) -> np.ndarray:
+    """Światła i cienie — osobna kontrola nad górą i dołem zakresu.
+
+    Ujemne „światła” ściągają najjaśniejsze partie spod sufitu, więc nic nie ląduje na
+    idealnej bieli i nie zostaje ścięte przy obcinaniu do zakresu. Ujemne „cienie”
+    dociskają dół ku zeru, dodatnie odklejają go od idealnej czerni. Środek zakresu
+    zostaje nietknięty, więc gamma i kontrast działają dokładnie jak wcześniej.
     """
-    out = np.maximum(h, 0.0)
-    peak = float(out.max())
-    if peak > 1.0:
-        out = out / peak
-    return out
+    if highlights:
+        w = _smoothstep(np.clip((h - PIVOT) / (1.0 - PIVOT), 0.0, 1.0))
+        h = h + highlights * w * ((1.0 - h) if highlights > 0 else (h - PIVOT))
+    if shadows:
+        w = _smoothstep(np.clip((PIVOT - h) / PIVOT, 0.0, 1.0))
+        h = h + shadows * w * ((PIVOT - h) if shadows > 0 else h)
+    return h
 
 
 def _odd(v: float) -> int:
@@ -166,21 +172,12 @@ def build(depth: np.ndarray, gray: np.ndarray | None, p: dict,
     clamp = float(q.get("detail_clamp", 0.08))
 
     def _add(hp: np.ndarray, amount: float) -> None:
-        """Dokłada warstwę detalu z uwzględnieniem zapasu do sufitu i podłogi.
-
-        Bez tego wyostrzanie wypycha najwyższe punkty daleko ponad zakres (przy sile 1.85
-        i limicie 0.135 to nawet +0.5), a sprowadzenie mapy z powrotem do 0..1 ścinało im
-        czubki w płaski krążek — na twarzy widać to jako spłaszczony nos. Teraz im bliżej
-        sufitu, tym mniej detalu da się jeszcze dołożyć, więc szczyt zostaje szczytem,
-        a wynik z definicji mieści się w zakresie.
-        """
         nonlocal h
         if guard_w is not None:
             hp = hp * guard_w
         if clamp > 0:
             hp = np.clip(hp, -clamp, clamp)
-        add = np.clip(hp * amount, -0.98, 0.98)
-        h = h + add * np.where(add > 0, 1.0 - h, h)
+        h = h + hp * amount
 
     if q["detail"] != 0:
         blur = cv2.GaussianBlur(h, (0, 0), max(0.3, float(q["detail_radius"])))
@@ -193,12 +190,15 @@ def build(depth: np.ndarray, gray: np.ndarray | None, p: dict,
         gb = cv2.GaussianBlur(g, (0, 0), max(0.3, float(q["micro_radius"])))
         _add(g - gb, float(q["micro"]) * 0.5)
 
-    # jedno wspólne sprowadzenie pod sufit po całym dokładaniu detalu
-    h = _fit_ceiling(h)
+    # Światła i cienie działają na surowej sumie, jeszcze przed obcięciem do zakresu —
+    # tylko wtedy ujemne „światła” mogą uratować szczyty wypchnięte ponad sufit przez
+    # wyostrzanie, zamiast ratować to, co już zostało ścięte.
+    h = _tone(h, float(np.clip(q["highlights"], -1.0, 1.0)),
+              float(np.clip(q["shadows"], -1.0, 1.0)))
 
     g_ = float(q["gamma"])
     if abs(g_ - 1.0) > 1e-3:
-        h = h ** max(0.05, g_)
+        h = np.clip(h, 0.0, 1.0) ** max(0.05, g_)
 
     c = float(np.clip(q["contrast"], -1.0, 1.0))
     if abs(c) > 1e-3:
@@ -209,7 +209,7 @@ def build(depth: np.ndarray, gray: np.ndarray | None, p: dict,
             inv = 0.5 - np.sin(np.arcsin(np.clip(1 - 2 * hc, -1, 1)) / 3.0)
             h = hc * (1 + c) + inv * (-c)
 
-    h = _fit_ceiling(h)
+    h = np.clip(h, 0.0, 1.0)
 
     f = float(np.clip(q["floor"], 0.0, 0.99))
     if f > 0:

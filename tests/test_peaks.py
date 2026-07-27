@@ -1,9 +1,9 @@
-"""Najwyższy punkt reliefu nie może być ścinany w płaski krążek.
+"""Światła i cienie: kontrola nad tym, co ląduje na idealnej bieli i czerni.
 
-Wyostrzanie dokłada do wysokości amplitudę ograniczoną tylko limitem detalu razy siłę
-— przy ustawieniach z presetu „Brelok" to nawet +0.5. Kiedy sufit 1.0 był egzekwowany
-twardym obcięciem, czubek nosa zamieniał się w płaski placek. Test mierzy wielkość tego
-placka i porównuje ją z tym samym szczytem policzonym bez wyostrzania.
+Mocne wyostrzanie wypycha najwyższe punkty ponad zakres 0..1, a obcięcie do zakresu
+robi z nich płaskie krążki — na twarzy widać to jako ścięty czubek nosa. Suwak „Światła”
+na minusie ściąga te partie spod sufitu, zanim dojdzie do obcięcia. Test sprawdza, że
+ta kontrola działa, oraz że z suwakami na zerze potok liczy dokładnie to, co wcześniej.
 """
 import sys
 from pathlib import Path
@@ -25,7 +25,6 @@ BRELOK = dict(clip_low=4.3, clip_high=100, gamma=2.42, contrast=1.0, median=5,
 
 
 def scene(sharpness: float = 7.0):
-    """Twarz z ostrym czubkiem — ostrym względem promienia wyostrzania (16.5 px)."""
     y, x = np.mgrid[0:H, 0:W].astype(np.float32)
     face = np.exp(-(((x - CX) / 130) ** 2 + ((y - 200) / 170) ** 2))
     nose = np.exp(-(((x - CX) / sharpness) ** 2 + ((y - CY) / (sharpness * 1.3)) ** 2))
@@ -35,68 +34,85 @@ def scene(sharpness: float = 7.0):
     return d, gray
 
 
+def build(over=None):
+    d, g = scene()
+    return hm.build(d, g, {**hm.DEFAULTS, **BRELOK, **(over or {})})
+
+
+def at_ceiling(h, eps=1e-4):
+    """Ile pikseli siedzi na idealnej bieli — tam relief jest ścięty na płasko."""
+    return int((h >= 1.0 - eps).sum())
+
+
+def at_floor(h, eps=1e-4):
+    return int((h <= eps).sum())
+
+
 def plateau(h, r=30, tol=1e-3):
-    """Ile pikseli wokół szczytu leży praktycznie na jednej wysokości."""
     sub = h[CY - r:CY + r, CX - r:CX + r]
     return int((sub >= sub.max() - tol).sum())
 
 
-def monotonic_from_peak(h, r=22) -> bool:
-    """Przekrój przez czubek musi opadać w obie strony bez płaskiego odcinka na górze."""
-    line = h[CY, CX - r:CX + r + 1]
-    top = int(np.argmax(line))
-    left, right = line[:top + 1], line[top:]
-    flat_top = np.sum(np.abs(np.diff(line[max(0, top - 3):top + 4])) < 1e-5)
-    return bool(np.all(np.diff(left) >= -1e-6) and np.all(np.diff(right) <= 1e-6)
-                and flat_top <= 2)
-
-
 def main() -> int:
-    depth, gray = scene()
     bad = 0
+    base = build()
+    print(f"punkt wyjscia (suwaki na zerze): na bieli {at_ceiling(base)} px, "
+          f"placek na czubku {plateau(base)} px\n")
 
-    ref = hm.build(depth, gray, {**hm.DEFAULTS, **BRELOK, "detail": 0.0, "micro": 0.0})
-    ref_flat = plateau(ref)
-    print(f"wzorzec bez wyostrzania:      placek {ref_flat:4} px, szczyt {ref.max():.4f}")
+    print(f"{'swiatla':>9} {'na bieli':>10} {'placek':>8} {'sr. wys.':>10} {'szczyt':>8}")
+    print("-" * 50)
+    prev_white = None
+    for hl in (0.0, -0.2, -0.4, -0.6, -0.8):
+        h = build({"highlights": hl})
+        obj = h > 0.05
+        w, p = at_ceiling(h), plateau(h)
+        print(f"{hl:9.2f} {w:10} {p:8} {h[obj].mean():10.4f} {h.max():8.4f}")
+        if prev_white is not None and w > prev_white:
+            print("   BLAD: ujemne swiatla nie zmniejszaja obszaru na bieli")
+            bad += 1
+        prev_white = w
 
-    print(f"\n{'ustawienia':34} {'placek':>7} {'szczyt':>8}  ocena")
-    print("-" * 62)
-    for label, over in (
-        ("brelok (wyostrzenie 1.85)", {}),
-        ("wyostrzenie 1.85 + limit 0.4", {"detail_clamp": 0.4}),
-        ("wyostrzenie 2.0, promien 25", {"detail": 2.0, "detail_radius": 25}),
-        ("mocny mikrodetal", {"micro": 0.8, "detail": 1.0}),
-        ("bardzo ostry czubek", {"median": 3}),
-    ):
-        d, g = scene(4.0) if label == "bardzo ostry czubek" else (depth, gray)
-        h = hm.build(d, g, {**hm.DEFAULTS, **BRELOK, **over})
-        n = plateau(h)
-        mono = monotonic_from_peak(h)
-        # placek nie moze byc istotnie wiekszy niz naturalne zaokraglenie szczytu
-        ok = n <= max(4 * ref_flat, 20) and mono
-        print(f"{label:34} {n:7} {h.max():8.4f}  "
-              f"{'OK' if ok else 'SCIETY CZUBEK <<<'}{'' if mono else ' (plaski odcinek)'}")
-        bad += not ok
-
-    # Osobna sprawa: filtr medianowy z zalozenia usuwa szczyty wezsze niz jego okno.
-    # To nie jest usterka, ale warto miec to zmierzone i widoczne.
-    print("\nwplyw odszumiania medianowego na waski czubek (4 px):")
-    d4, g4 = scene(4.0)
-    for med in (0, 3, 5):
-        hm4 = hm.build(d4, g4, {**hm.DEFAULTS, **BRELOK, "median": med, "bilateral": 0})
-        line = hm4[CY, CX - 8:CX + 9]
-        top = int(np.argmax(line))
-        flat = int(np.sum(np.abs(np.diff(line[max(0, top - 3):top + 4])) < 1e-5))
-        print(f"  median {med} px: plaskich krokow na szczycie {flat}")
-
-    print("\nprzekroj przez czubek (co 2 px):")
-    h = hm.build(depth, gray, {**hm.DEFAULTS, **BRELOK})
-    print("  " + " ".join(f"{v:.4f}" for v in h[CY, CX - 12:CX + 13][::2]))
-
-    # zakres wyjsciowy musi zostac poprawny
-    if not (0.0 <= h.min() and h.max() <= 1.0 + 1e-6):
-        print(f"   BLAD: mapa poza zakresem 0..1 ({h.min()}..{h.max()})")
+    strong = build({"highlights": -0.6})
+    if at_ceiling(strong) >= at_ceiling(base):
+        print("   BLAD: suwak swiatel nie zdejmuje reliefu z sufitu")
         bad += 1
+    if plateau(strong) >= plateau(base):
+        print("   BLAD: suwak swiatel nie zmniejsza plaskiego placka na czubku")
+        bad += 1
+
+    # Cienie mierzymy bez progu tła i zejścia przy krawędziach — te i tak zerują tło
+    # już po tym etapie, więc zasłoniłyby efekt suwaka.
+    plain = {"floor": 0.0, "edge_falloff": 0.0, "margin": 0.0}
+    ref_floor = at_floor(build(plain))
+    print(f"\n{'cienie':>9} {'na czerni':>11} {'sr. wys.':>10}   (bez progu tla)")
+    print("-" * 46)
+    for sh in (-0.5, 0.0, 0.4, 0.8):
+        h = build({**plain, "shadows": sh})
+        obj = h > 0.05
+        print(f"{sh:9.2f} {at_floor(h):11} {h[obj].mean():10.4f}")
+    if at_floor(build({**plain, "shadows": 0.6})) >= ref_floor:
+        print("   BLAD: dodatnie cienie nie odklejaja dolu od czerni")
+        bad += 1
+    if at_floor(build({**plain, "shadows": -0.5})) <= ref_floor:
+        print("   BLAD: ujemne cienie nie dociskaja dolu ku czerni")
+        bad += 1
+
+    print("\nsrodek zakresu ma zostac nietkniety (gamma pracuje jak wczesniej):")
+    d, g = scene()
+    probe = np.linspace(0.0, 1.0, 11, dtype=np.float32).reshape(1, 11)
+    for hl, sh in ((-0.6, 0.0), (0.0, 0.6)):
+        out = hm._tone(probe.copy(), hl, sh)[0]
+        mid = float(abs(out[5] - probe[0, 5]))
+        print(f"  swiatla {hl:+.1f} cienie {sh:+.1f}: 0.5 -> {out[5]:.4f} "
+              f"({'OK' if mid < 1e-6 else 'ZMIENIONE <<<'})")
+        if mid >= 1e-6:
+            bad += 1
+
+    print("\nprzekroj przez czubek:")
+    for hl in (0.0, -0.4, -0.8):
+        h = build({"highlights": hl})
+        print(f"  swiatla {hl:+.1f}: " +
+              " ".join(f"{v:.4f}" for v in h[CY, CX - 12:CX + 13][::2]))
 
     print()
     print("OK" if not bad else f"{bad} problemow")

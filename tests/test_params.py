@@ -59,6 +59,10 @@ CASES = [
     ("gamma",          {}, 0.45),
     ("contrast",       {}, 0.8),
     ("contrast(-)",    {}, None),          # obsłużone niżej
+    ("highlights",     {}, -0.6),
+    ("highlights(+)",  {}, None),
+    ("shadows",        {"floor": 0.0}, 0.6),
+    ("shadows(-)",     {"floor": 0.0}, None),
     ("median",         {}, 5),
     ("bilateral",      {}, 8),
     ("smooth",         {}, 3.0),
@@ -99,6 +103,10 @@ def main() -> int:
     for name, ctx, val in CASES:
         if name == "contrast(-)":
             key, val = "contrast", -0.8
+        elif name == "highlights(+)":
+            key, val = "highlights", 0.6
+        elif name == "shadows(-)":
+            key, val = "shadows", -0.6
         else:
             key = name
         base = build(ctx)

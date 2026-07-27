@@ -69,6 +69,11 @@ kompresji. Upscaling 900×675 → 3600×2700 zajmuje ok. 10 s na RTX A4500.
 | Odcięcie dołu/góry | Percentyle rozciągnięcia zakresu — obcina wartości odstające |
 | Gamma | <1 podbija wypukłości, >1 spłaszcza pierwszy plan |
 | Kontrast (krzywa S) | Rozdziela plany; ujemny spłaszcza |
+| Światła | Ujemne ściągają najwyższe partie spod sufitu — nic nie ląduje na idealnej bieli i nie zostaje ścięte na płasko. Dodatnie wypychają je ku sufitowi |
+| Cienie | Ujemne dociskają dół ku zeru, dodatnie odklejają go od idealnej czerni |
+
+Światła i cienie działają na surowej sumie, jeszcze przed obcięciem do zakresu, i nie
+ruszają środka zakresu — gamma i kontrast pracują dokładnie tak samo jak bez nich.
 
 **Detal i wygładzanie**
 | Parametr | Znaczenie |
@@ -139,10 +144,11 @@ naprawdę ma relief. Podgląd przelicza się na bieżąco przy każdej zmianie p
 
 ## Wskazówki praktyczne
 
-- **Ścięty czubek nosa albo inny najwyższy punkt?** Wyostrzanie wygasza się teraz w miarę
-  zbliżania do sufitu zakresu, więc szczyty nie są już wypychane poza skalę i ścinane.
-  Jeśli mimo to czubek jest płaski, zejdź z „Odszumianiem medianowym" na 3 px — mediana
-  5 px z definicji usuwa szczyty węższe niż jej okno.
+- **Ścięty czubek nosa albo inny najwyższy punkt?** Przy mocnym wyostrzaniu najwyższe
+  partie wychodzą ponad zakres i obcięcie robi z nich płaskie krążki. Zejdź suwakiem
+  „Światła" na jakieś −0,2 do −0,4 — ściąga je spod sufitu, zanim dojdzie do obcięcia,
+  a środek zakresu i gamma zostają nietknięte. Drugi trop: „Odszumianie medianowe" 5 px
+  z definicji usuwa szczyty węższe niż jego okno, więc przy drobnych detalach zejdź na 3 px.
 - **Kwadraty i „robaki" na powierzchni reliefu?** To artefakty JPEG ze źródła. Podnieś
   „Usuwanie artefaktów JPEG" do ~0,5, a przy małym lub mocno zniszczonym pliku włącz
   upscaling 4×. Sam „Mikrodetal z obrazu" bez tego kroku wtłacza artefakty wprost w wysokość.
@@ -204,9 +210,9 @@ Nie wymaga modelu ani GPU.
 .venv\Scripts\python.exe tests\test_peaks.py
 ```
 
-`test_peaks.py` — najwyższy punkt reliefu nie może być ścinany w płaski krążek.
-Mierzy wielkość płaskiego placka na czubku i porównuje go z tym samym szczytem
-policzonym bez wyostrzania.
+`test_peaks.py` — suwaki świateł i cieni. Sprawdza, że ujemne światła realnie zdejmują
+relief z idealnej bieli (i likwidują płaski placek na czubku), że cienie działają
+symetrycznie od dołu, oraz że oba zostawiają środek zakresu nietknięty.
 
 `test_cut.py` — wycinanie sylwetki na kształtach wklęsłych, z otworem i rozpadających się
 na kilka brył; sprawdza szczelność, faktyczne zniknięcie płyty i filtr wysepek.

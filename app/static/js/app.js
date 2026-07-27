@@ -8,6 +8,7 @@ window.viewer = viewer;   // dostęp z konsoli do diagnostyki
 const PREP = ['deblock', 'chroma', 'sr_model', 'work_max'];
 const RANGES = ['deblock', 'chroma', 'work_max',
   'input_size', 'tile_blend', 'clip_low', 'clip_high', 'gamma', 'contrast',
+  'highlights', 'shadows',
   'bilateral', 'smooth', 'detail', 'detail_radius', 'detail_guard', 'detail_clamp',
   'micro', 'micro_radius', 'floor',
   'floor_soft', 'edge_falloff', 'corner', 'margin', 'alpha_threshold', 'alpha_grow',
@@ -23,7 +24,7 @@ const DEC = { gamma: 2, contrast: 2, tile_blend: 2, micro: 2, floor: 2, floor_so
   edge_falloff: 2, corner: 2, margin: 2, detail: 2, smooth: 1, detail_radius: 1,
   micro_radius: 1, relief_mm: 1, base_mm: 1, clip_low: 1, clip_high: 1,
   detail_guard: 2, detail_clamp: 3, alpha_threshold: 2, cut_level: 2, min_island: 2,
-  deblock: 2, chroma: 2 };
+  deblock: 2, chroma: 2, highlights: 2, shadows: 2 };
 
 const state = { id: null, hasDepth: false, busy: false, pending: false, ctrl: null };
 

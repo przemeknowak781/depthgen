@@ -10,8 +10,6 @@ DEFAULTS = {
     "clip_high": 99.5,      # percentyl odcięcia góry
     "gamma": 1.0,           # <1 podbija wypukłości, >1 spłaszcza
     "contrast": 0.0,        # -1..1 krzywa S
-    "highlights": 0.0,      # -1..1 — ujemne ściąga szczyty spod sufitu (koniec z idealną bielą)
-    "shadows": 0.0,         # -1..1 — dodatnie odkleja dół od idealnej czerni
     "median": 0,            # 0/3/5 px — usuwa pojedyncze piksele (kolce na włosach)
     "smooth": 0.0,          # px, gaussian (redukcja szumu)
     "bilateral": 0.0,       # px, wygładza zachowując krawędzie
@@ -39,26 +37,6 @@ DEFAULTS = {
 
 def _smoothstep(x: np.ndarray) -> np.ndarray:
     return x * x * (3.0 - 2.0 * x)
-
-
-PIVOT = 0.5   # środek zakresu, ku któremu ściągają suwaki świateł i cieni
-
-
-def _tone(h: np.ndarray, highlights: float, shadows: float) -> np.ndarray:
-    """Światła i cienie — osobna kontrola nad górą i dołem zakresu.
-
-    Ujemne „światła” ściągają najjaśniejsze partie spod sufitu, więc nic nie ląduje na
-    idealnej bieli i nie zostaje ścięte przy obcinaniu do zakresu. Ujemne „cienie”
-    dociskają dół ku zeru, dodatnie odklejają go od idealnej czerni. Środek zakresu
-    zostaje nietknięty, więc gamma i kontrast działają dokładnie jak wcześniej.
-    """
-    if highlights:
-        w = _smoothstep(np.clip((h - PIVOT) / (1.0 - PIVOT), 0.0, 1.0))
-        h = h + highlights * w * ((1.0 - h) if highlights > 0 else (h - PIVOT))
-    if shadows:
-        w = _smoothstep(np.clip((PIVOT - h) / PIVOT, 0.0, 1.0))
-        h = h + shadows * w * ((PIVOT - h) if shadows > 0 else h)
-    return h
 
 
 def _odd(v: float) -> int:
@@ -182,6 +160,7 @@ def build(depth: np.ndarray, gray: np.ndarray | None, p: dict,
     if q["detail"] != 0:
         blur = cv2.GaussianBlur(h, (0, 0), max(0.3, float(q["detail_radius"])))
         _add(h - blur, float(q["detail"]) * 2.0)
+        h = np.clip(h, 0.0, 1.0)
 
     if q["micro"] != 0 and gray is not None:
         g = gray.astype(np.float32)
@@ -189,12 +168,6 @@ def build(depth: np.ndarray, gray: np.ndarray | None, p: dict,
             g = cv2.resize(g, (h.shape[1], h.shape[0]), interpolation=cv2.INTER_AREA)
         gb = cv2.GaussianBlur(g, (0, 0), max(0.3, float(q["micro_radius"])))
         _add(g - gb, float(q["micro"]) * 0.5)
-
-    # Światła i cienie działają na surowej sumie, jeszcze przed obcięciem do zakresu —
-    # tylko wtedy ujemne „światła” mogą uratować szczyty wypchnięte ponad sufit przez
-    # wyostrzanie, zamiast ratować to, co już zostało ścięte.
-    h = _tone(h, float(np.clip(q["highlights"], -1.0, 1.0)),
-              float(np.clip(q["shadows"], -1.0, 1.0)))
 
     g_ = float(q["gamma"])
     if abs(g_ - 1.0) > 1e-3:

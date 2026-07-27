@@ -72,6 +72,26 @@
     </section>
 
     <section class="grp open">
+      <h3>1b · Czyszczenie i upscaling</h3>
+      <div class="body">
+        <p class="note">Artefakty JPEG trafiają do reliefu jako kwadraty 8×8 i dzwonienie
+          przy krawędziach. Ten krok czyści obraz, zanim policzymy głębię.</p>
+        <div class="row"><label>Usuwanie artefaktów JPEG <b id="v_deblock">0.00</b>
+          <input type="range" id="deblock" min="0" max="1" step="0.05" value="0"></label></div>
+        <div class="row"><label>Czyszczenie koloru <b id="v_chroma">0.50</b>
+          <input type="range" id="chroma" min="0" max="1" step="0.05" value="0.5"></label></div>
+        <label>Upscaling
+          <select id="sr_model"></select>
+        </label>
+        <p class="note">4× dla małych i mocno zniszczonych obrazów, 2× dla dużych i czystych.
+          Model dobiera rozmiar wejścia sam, żeby zdążyć w rozsądnym czasie.</p>
+        <div class="row"><label>Rozdzielczość robocza [px] <b id="v_work_max">2400</b>
+          <input type="range" id="work_max" min="800" max="4000" step="100" value="2400"></label></div>
+        <div id="prepInfo" class="prog"></div>
+      </div>
+    </section>
+
+    <section class="grp open">
       <h3>2 · Głębia</h3>
       <div class="body">
         <label class="chk"><input type="checkbox" id="invert"> Odwróć (dalekie = wysokie)</label>

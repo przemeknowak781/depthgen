@@ -38,6 +38,30 @@ Wymagania: Python 3.10+ i (opcjonalnie) karta NVIDIA z CUDA. Bez GPU działa na 
 | Przebieg kafelkowy | 2×2 lub 3×3 kafle = znacznie więcej mikrodetalu (kilka razy dłużej) |
 | Siła detalu z kafli | Ile wysokich częstotliwości z kafli wchodzi do mapy |
 
+**Czyszczenie i upscaling** — artefakty JPEG trafiają do reliefu jako kwadraty 8×8
+i dzwonienie przy krawędziach, więc obraz czyścimy zanim policzymy głębię. Program mierzy
+„blokowość" wgranego pliku (energia gradientu na siatce 8×8 względem reszty obrazu)
+i przy wartości powyżej 1,12 sam włącza czyszczenie.
+
+| Parametr | Znaczenie |
+|---|---|
+| Usuwanie artefaktów JPEG | Deblocking na granicach bloków + filtr na dzwonienie. Sensowny zakres 0,4–0,6; przy 1,0 zaczyna zjadać prawdziwą fakturę |
+| Czyszczenie koloru | Kanały koloru są w JPEG podpróbkowane i najbrudniejsze, można je ciąć mocno |
+| Upscaling | Swin2SR liczony lokalnie na GPU. **4× dla obrazów małych i mocno zniszczonych**, 2× dla dużych i czystych — model „classical" zakłada czyste wejście i artefakty by wzmocnił |
+| Rozdzielczość robocza | Docelowy bok obrazu, na którym liczona jest głębia i relief. Zejście z rozdzielczości po upscalingu samo w sobie czyści resztki artefaktów (nadpróbkowanie) |
+
+Zmierzone na obrazie testowym zapisanym w jakości JPEG 18:
+
+| | blokowość | PSNR do oryginału | mikrodetal w reliefie |
+|---|---|---|---|
+| po kompresji | 3,29 | 35,9 dB | 1,34× |
+| deblock 0,5 | 0,92 | 36,4 dB | 0,84× |
+| deblock + nadpróbkowanie | 0,91 | **37,1 dB** | **1,07×** |
+| Swin2SR 4× (compressed) | 1,00 | — | — |
+
+PSNR **rośnie**, więc to nie jest zwykłe rozmycie — obraz zbliża się do oryginału sprzed
+kompresji. Upscaling 900×675 → 3600×2700 zajmuje ok. 10 s na RTX A4500.
+
 **Głębia**
 | Parametr | Znaczenie |
 |---|---|
@@ -107,6 +131,9 @@ naprawdę ma relief. Podgląd przelicza się na bieżąco przy każdej zmianie p
 
 ## Wskazówki praktyczne
 
+- **Kwadraty i „robaki" na powierzchni reliefu?** To artefakty JPEG ze źródła. Podnieś
+  „Usuwanie artefaktów JPEG" do ~0,5, a przy małym lub mocno zniszczonym pliku włącz
+  upscaling 4×. Sam „Mikrodetal z obrazu" bez tego kroku wtłacza artefakty wprost w wysokość.
 - **Za mało detalu?** Podnieś rozdz. sieci, włącz kafle 2×2, dodaj „Mikrodetal z obrazu".
 - **Kolce i postrzępione krawędzie?** Podnieś „Ochronę krawędzi sylwetki", zmniejsz
   „Limit amplitudy", włącz odszumianie medianowe 3 px.
@@ -119,6 +146,7 @@ naprawdę ma relief. Podgląd przelicza się na bieżąco przy każdej zmianie p
 ## Struktura
 
 ```
+app/enhance.py     czyszczenie artefaktów JPEG, upscaling (Swin2SR)
 app/depth.py       modele głębi, przebieg kafelkowy
 app/heightmap.py   obróbka mapy głębi -> mapa wysokości
 app/mesh.py        pole wysokości -> siatka, eksport
@@ -153,6 +181,15 @@ te same parametry muszą dać bit w bit tę samą siatkę.
 
 `test_cut.py` — wycinanie sylwetki na kształtach wklęsłych, z otworem i rozpadających się
 na kilka brył; sprawdza szczelność, faktyczne zniknięcie płyty i filtr wysepek.
+
+```bash
+.venv\Scripts\python.exe tests\test_enhance.py
+```
+
+`test_enhance.py` — psuje czysty obraz kompresją JPEG 18 i sprawdza, czy czyszczenie
+usuwa blokowość, **podnosi** PSNR względem oryginału (czyli nie jest zwykłym rozmyciem)
+i przywraca poziom mikrodetalu wchodzącego do reliefu. Z przełącznikiem `--sr` testuje
+też model upscalingu i szwy jego kafelkowania.
 
 `test_tiles.py` — artefakty przebiegu kafelkowego. Porównuje obecny algorytm ze starym
 i mierzy poświatę wokół sylwetki, płaskość tła oraz realny przyrost mikrodetalu.

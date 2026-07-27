@@ -5,22 +5,25 @@ const viewer = new Viewer($('view'));
 window.viewer = viewer;   // dostęp z konsoli do diagnostyki
 
 // Parametry sterujące — nazwa pola == nazwa parametru w backendzie.
-const RANGES = ['input_size', 'tile_blend', 'clip_low', 'clip_high', 'gamma', 'contrast',
+const PREP = ['deblock', 'chroma', 'sr_model', 'work_max'];
+const RANGES = ['deblock', 'chroma', 'work_max',
+  'input_size', 'tile_blend', 'clip_low', 'clip_high', 'gamma', 'contrast',
   'bilateral', 'smooth', 'detail', 'detail_radius', 'detail_guard', 'detail_clamp',
   'micro', 'micro_radius', 'floor',
   'floor_soft', 'edge_falloff', 'corner', 'margin', 'alpha_threshold', 'alpha_grow',
   'cut_level', 'min_island', 'resolution', 'width_mm', 'relief_mm', 'base_mm', 'exres'];
 const CHECKS = ['invert', 'trim', 'solid', 'alpha_cut'];
-const SELECTS = ['shape', 'median'];
+const SELECTS = ['shape', 'median', 'sr_model'];
 // zmiany tych pól wymagają ponownego liczenia sieci, nie tylko przebudowy siatki
-const DEPTH_ONLY = new Set(['input_size', 'tiles', 'tile_blend', 'model']);
+const DEPTH_ONLY = new Set(['input_size', 'tiles', 'tile_blend', 'model', ...PREP]);
 // te w ogóle nie dotyczą podglądu (używane dopiero przy eksporcie)
 const NO_REBUILD = new Set(['exres']);
 
 const DEC = { gamma: 2, contrast: 2, tile_blend: 2, micro: 2, floor: 2, floor_soft: 3,
   edge_falloff: 2, corner: 2, margin: 2, detail: 2, smooth: 1, detail_radius: 1,
   micro_radius: 1, relief_mm: 1, base_mm: 1, clip_low: 1, clip_high: 1,
-  detail_guard: 2, detail_clamp: 3, alpha_threshold: 2, cut_level: 2, min_island: 2 };
+  detail_guard: 2, detail_clamp: 3, alpha_threshold: 2, cut_level: 2, min_island: 2,
+  deblock: 2, chroma: 2 };
 
 const state = { id: null, hasDepth: false, busy: false, pending: false, ctrl: null };
 
@@ -129,6 +132,20 @@ async function upload(file) {
     $('saveDepth').disabled = true;
     $('prog').textContent = `${j.width} × ${j.height} px — gotowe do analizy głębi.`;
     $('hint').textContent = 'Kliknij „Generuj mapę głębi”.';
+    if (j.blockiness > 1.12) {
+      if (parseFloat($('deblock').value) === 0) {
+        // powyżej ~0,7 filtr zaczyna zjadać prawdziwą fakturę, więc tam się zatrzymujemy
+        $('deblock').value = Math.min(0.7, 0.25 + (j.blockiness - 1.12) * 0.35).toFixed(2);
+        label('deblock');
+        save();
+      }
+      $('prepInfo').textContent =
+        `Wykryto artefakty JPEG (blokowość ${j.blockiness.toFixed(2)}) — ` +
+        `włączyłem czyszczenie. Przy mocno zniszczonym obrazie dodaj upscaling 4×.`;
+      $('deblock').closest('.grp').classList.add('open');
+    } else {
+      $('prepInfo').textContent = `Obraz czysty (blokowość ${j.blockiness.toFixed(2)}).`;
+    }
     if (j.has_alpha) {
       $('alpha_cut').checked = true;
       $('trim').checked = true;
@@ -165,6 +182,12 @@ async function generate() {
         input_size: parseInt($('input_size').value),
         tiles: parseInt($('tiles').value),
         tile_blend: parseFloat($('tile_blend').value),
+        prep: {
+          deblock: parseFloat($('deblock').value),
+          chroma: parseFloat($('chroma').value),
+          sr_model: $('sr_model').value,
+          work_max: parseInt($('work_max').value),
+        },
       }),
     });
     if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
@@ -176,6 +199,17 @@ async function generate() {
     $('hint').classList.add('hidden');
     $('prog').textContent = `Mapa głębi gotowa w ${(j.ms / 1000).toFixed(1)} s ` +
       `(${(performance.now() - t0) / 1000 | 0} s łącznie).`;
+    if (j.prep) {
+      const p = j.prep;
+      const d = (p.blockiness_before - p.blockiness_after) / Math.max(p.blockiness_before - 1, 1e-6);
+      $('prepInfo').textContent =
+        `Obraz roboczy ${p.width}×${p.height} px` +
+        (p.sr_input ? ` (upscaling ${p.sr_input[0]}×${p.sr_input[1]} → ${p.scale}×)` : '') +
+        ` · blokowość ${p.blockiness_before.toFixed(2)} → ${p.blockiness_after.toFixed(2)}` +
+        (p.blockiness_before > 1.05 ? ` (−${Math.round(Math.max(0, Math.min(1, d)) * 100)}%)` : '');
+      // podgląd obrazu po czyszczeniu
+      $('mapSrc').src = `/api/image/${state.id}?v=${Date.now()}`;
+    }
     await rebuild();
     viewer.fit();
   } catch (e) {
@@ -368,6 +402,13 @@ fetch('/api/info').then(r => r.json()).then(j => {
     const o = document.createElement('option');
     o.value = m.key; o.textContent = m.label; o.dataset.size = m.default_size;
     sel.appendChild(o);
+  }
+  const sr = $('sr_model');
+  sr.innerHTML = '';
+  for (const m of j.sr_models || []) {
+    const o = document.createElement('option');
+    o.value = m.key; o.textContent = m.label;
+    sr.appendChild(o);
   }
   sel.value = localStorage.getItem('depthgen_model') || 'dav2-large';
   sel.addEventListener('change', () => {

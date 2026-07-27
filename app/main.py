@@ -14,12 +14,13 @@ from fastapi.staticfiles import StaticFiles
 from PIL import Image
 
 from . import depth as depth_mod
+from . import enhance as enh_mod
 from . import heightmap as hm_mod
 from . import mesh as mesh_mod
 
 ROOT = Path(__file__).resolve().parent
 STATIC = ROOT / "static"
-MAX_SIDE = 2400  # górny limit rozdzielczości roboczej obrazu
+MAX_SRC = 4000  # górny limit rozdzielczości oryginału trzymanego w sesji
 
 app = FastAPI(title="DepthGen")
 
@@ -55,7 +56,11 @@ def info() -> dict:
             {"key": k, "label": v["label"], "default_size": v["default_size"]}
             for k, v in depth_mod.MODELS.items()
         ],
-        "defaults": {**hm_mod.DEFAULTS, **mesh_mod.MESH_DEFAULTS},
+        "sr_models": [
+            {"key": k, "label": v["label"], "scale": v["scale"]}
+            for k, v in enh_mod.SR_MODELS.items()
+        ],
+        "defaults": {**hm_mod.DEFAULTS, **mesh_mod.MESH_DEFAULTS, **enh_mod.DEFAULTS},
     }
 
 
@@ -64,35 +69,55 @@ def upload(file: UploadFile = File(...)) -> dict:
     data = file.file.read()
     try:
         src = Image.open(io.BytesIO(data))
+        src.load()
     except Exception:
         raise HTTPException(400, "Nie udało się odczytać obrazu.")
-    if max(src.size) > MAX_SIDE:
-        s = MAX_SIDE / max(src.size)
+    if max(src.size) > MAX_SRC:
+        s = MAX_SRC / max(src.size)
         src = src.resize((int(src.width * s), int(src.height * s)), Image.LANCZOS)
 
-    # Przezroczystość zachowujemy osobno — posłuży do wycięcia sylwetki. Sieć głębi
-    # dostaje obraz podłożony na neutralnej szarości, żeby nie brała pustego tła
-    # za czarną ścianę tuż przed obiektem.
-    alpha = None
-    if src.mode in ("RGBA", "LA") or (src.mode == "P" and "transparency" in src.info):
-        rgba = src.convert("RGBA")
-        a = np.asarray(rgba.getchannel("A"), dtype=np.float32) / 255.0
-        if a.min() < 0.99:
-            alpha = a
-        bg = Image.new("RGBA", rgba.size, (128, 128, 128, 255))
-        img = Image.alpha_composite(bg, rgba).convert("RGB")
-    else:
-        img = src.convert("RGB")
-
-    arr = np.asarray(img, dtype=np.float32) / 255.0
-    gray = (arr @ np.array([0.299, 0.587, 0.114], dtype=np.float32)).astype(np.float32)
-
     sid = uuid.uuid4().hex[:12]
-    SESSIONS[sid] = {"img": img, "gray": gray, "alpha": alpha, "depth": None,
+    SESSIONS[sid] = {"src": src, "prep_key": None, "depth": None,
                      "t": time.time(), "name": file.filename or "obraz"}
     _trim_sessions()
-    return {"id": sid, "width": img.width, "height": img.height,
-            "name": file.filename, "has_alpha": alpha is not None}
+    meta = _prepare(sid, {})
+    return {"id": sid, "width": meta["width"], "height": meta["height"],
+            "name": file.filename, "has_alpha": SESSIONS[sid]["alpha"] is not None,
+            "src_width": src.width, "src_height": src.height,
+            "blockiness": meta["blockiness_before"]}
+
+
+def _prepare(sid: str, prep: dict, progress=None) -> dict:
+    """Przygotowuje obraz roboczy (odszumianie JPEG, upscaling). Wynik jest cache'owany
+    — suwaki reliefu nie mają prawa uruchamiać tego kroku."""
+    s = _sess(sid)
+    q = {**enh_mod.DEFAULTS, **(prep or {})}
+    key = repr(sorted(q.items()))
+    if s.get("prep_key") == key:
+        return s["prep_meta"]
+
+    img, meta = enh_mod.prepare(s["src"], q, progress)
+
+    # Przezroczystość trzymamy osobno — posłuży do wycięcia sylwetki. Sieć głębi dostaje
+    # obraz podłożony na neutralnej szarości, żeby nie wzięła pustego tła za ścianę.
+    alpha = None
+    if img.mode == "RGBA":
+        a = np.asarray(img.getchannel("A"), dtype=np.float32) / 255.0
+        if a.min() < 0.99:
+            alpha = a
+        bg = Image.new("RGBA", img.size, (128, 128, 128, 255))
+        img = Image.alpha_composite(bg, img).convert("RGB")
+    else:
+        img = img.convert("RGB")
+
+    arr = np.asarray(img, dtype=np.float32) / 255.0
+    s["img"] = img
+    s["gray"] = (arr @ np.array([0.299, 0.587, 0.114], dtype=np.float32)).astype(np.float32)
+    s["alpha"] = alpha
+    s["prep_key"] = key
+    s["prep_meta"] = meta
+    s["depth"] = None            # zmiana obrazu unieważnia mapę głębi
+    return meta
 
 
 @app.get("/api/image/{sid}")
@@ -114,6 +139,8 @@ def make_depth(payload: dict = Body(...)) -> dict:
     t0 = time.time()
     PROGRESS[sid] = "Start..."
     try:
+        meta = _prepare(sid, payload.get("prep", {}),
+                        progress=lambda m: PROGRESS.__setitem__(sid, m))
         res = depth_mod.estimate(
             s["img"],
             model_key=payload.get("model", "dav2-large"),
@@ -129,7 +156,8 @@ def make_depth(payload: dict = Body(...)) -> dict:
     s["depth"] = res.depth
     s["t"] = time.time()
     PROGRESS[sid] = ""
-    return {"ok": True, "ms": int((time.time() - t0) * 1000), "shape": list(res.depth.shape)}
+    return {"ok": True, "ms": int((time.time() - t0) * 1000),
+            "shape": list(res.depth.shape), "prep": meta}
 
 
 @app.post("/api/depth-upload")

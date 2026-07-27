@@ -187,6 +187,15 @@ te same parametry muszą dać bit w bit tę samą siatkę.
 .venv\Scripts\python.exe tests\test_tiles.py
 ```
 
+```bash
+.venv\Scripts\python.exe tests\test_export.py
+```
+
+`test_export.py` — eksport przez prawdziwe API: nazwy plików z polskimi znakami i emoji
+(nagłówek HTTP musi być latin-1, więc idzie RFC 5987), wszystkie formaty oraz skrajne
+ustawienia przycinania — te mogą zwrócić bryłę albo czytelny błąd 400, ale nigdy 500.
+Nie wymaga modelu ani GPU.
+
 `test_cut.py` — wycinanie sylwetki na kształtach wklęsłych, z otworem i rozpadających się
 na kilka brył; sprawdza szczelność, faktyczne zniknięcie płyty i filtr wysepek.
 

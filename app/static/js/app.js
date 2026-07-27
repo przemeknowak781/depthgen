@@ -78,7 +78,7 @@ async function rebuild() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id: state.id, params: p, resolution: p.resolution }),
     });
-    if (!r.ok) throw new Error(await r.text());
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || r.statusText);
     const buf = await r.arrayBuffer();
     viewer.load(buf);
     $('stats').textContent =
@@ -235,7 +235,10 @@ async function doExport() {
     if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
     const blob = await r.blob();
     const cd = r.headers.get('Content-Disposition') || '';
-    const name = (cd.match(/filename="(.+?)"/) || [, 'relief.' + $('format').value])[1];
+    // filename* niesie pełną nazwę w UTF-8; filename="" to zapasowa wersja ASCII
+    const utf8 = cd.match(/filename\*=UTF-8''([^;]+)/);
+    const name = utf8 ? decodeURIComponent(utf8[1])
+      : (cd.match(/filename="(.+?)"/) || [, 'relief.' + $('format').value])[1];
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
     a.download = name;

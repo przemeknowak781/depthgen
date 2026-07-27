@@ -2,9 +2,12 @@
 from __future__ import annotations
 
 import io
+import re
 import time
+import unicodedata
 import uuid
 from pathlib import Path
+from urllib.parse import quote
 
 import cv2
 import numpy as np
@@ -197,7 +200,10 @@ def mesh_preview(payload: dict = Body(...)) -> Response:
     sid = payload.get("id", "")
     params = payload.get("params", {})
     h, mask = _height(sid, params)
-    m = mesh_mod.build(h, {**params, "resolution": int(payload.get("resolution", 400))}, mask)
+    try:
+        m = mesh_mod.build(h, {**params, "resolution": int(payload.get("resolution", 400))}, mask)
+    except mesh_mod.EmptyMesh as e:
+        raise HTTPException(400, str(e))
     body = mesh_mod.to_binary(m)
     st = m.stats
     return Response(
@@ -217,20 +223,34 @@ def export(payload: dict = Body(...)) -> Response:
     params = payload.get("params", {})
     fmt = str(payload.get("format", "stl")).lower()
     h, mask = _height(sid, params)
-    m = mesh_mod.build(h, {**params, "resolution": int(payload.get("resolution", 1200))}, mask)
+    try:
+        m = mesh_mod.build(h, {**params, "resolution": int(payload.get("resolution", 1200))}, mask)
+    except mesh_mod.EmptyMesh as e:
+        raise HTTPException(400, str(e))
     try:
         data = mesh_mod.export(m, fmt)
+    except ImportError as e:
+        raise HTTPException(500, f"Format {fmt.upper()} wymaga brakującej biblioteki ({e.name}). "
+                                 f"Zainstaluj ją albo wybierz STL.")
     except Exception as e:  # noqa: BLE001
         raise HTTPException(500, f"Błąd eksportu: {e}")
-    name = Path(_sess(sid)["name"]).stem or "relief"
+    name = (Path(_sess(sid)["name"]).stem or "relief") + f"_relief.{fmt}"
     return Response(
         data,
         media_type="application/octet-stream",
         headers={
-            "Content-Disposition": f'attachment; filename="{name}_relief.{fmt}"',
+            "Content-Disposition": _disposition(name),
             "X-Mesh-Faces": str(m.stats["faces"]),
         },
     )
+
+
+def _disposition(name: str) -> str:
+    """Nagłówki HTTP muszą być latin-1, a nazwy plików bywają polskie — stąd RFC 5987:
+    zapasowa nazwa ASCII dla starych klientów plus pełna, zakodowana w UTF-8."""
+    ascii_name = re.sub(r"[^A-Za-z0-9._-]+", "_", unicodedata.normalize("NFKD", name)
+                        .encode("ascii", "ignore").decode()) or "relief"
+    return f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(name)}"
 
 
 @app.get("/favicon.ico")

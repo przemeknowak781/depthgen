@@ -18,6 +18,10 @@ MESH_DEFAULTS = {
 }
 
 
+class EmptyMesh(ValueError):
+    """Po przycięciu nie zostało nic, z czego dałoby się zbudować bryłę."""
+
+
 @dataclass
 class Mesh:
     vertices: np.ndarray  # (N,3) float32
@@ -71,6 +75,12 @@ def build(height: np.ndarray, p: dict, mask: np.ndarray | None = None) -> Mesh:
     else:
         mk = np.ones((gh, gw), dtype=bool)
 
+    if not mk.any():
+        raise EmptyMesh(
+            "Przycinanie usunęło całą bryłę. Zmniejsz „Odetnij poniżej wysokości”, "
+            "„Margines” lub „Próg tła”."
+        )
+
     idx = np.full((gh, gw), -1, dtype=np.int64)
     n_top = int(mk.sum())
     idx[mk] = np.arange(n_top, dtype=np.int64)
@@ -82,6 +92,12 @@ def build(height: np.ndarray, p: dict, mask: np.ndarray | None = None) -> Mesh:
     v01 = idx[1:, :-1]
     v11 = idx[1:, 1:]
     cell = (v00 >= 0) & (v10 >= 0) & (v01 >= 0) & (v11 >= 0)
+
+    if not cell.any():
+        raise EmptyMesh(
+            "Po przycięciu zostały tylko pojedyncze punkty — nie da się z nich zbudować "
+            "powierzchni. Poluzuj progi przycinania albo podnieś rozdzielczość."
+        )
 
     a, b, c, d = v01[cell], v11[cell], v10[cell], v00[cell]
     faces = [np.stack([a, b, c], 1), np.stack([a, c, d], 1)]

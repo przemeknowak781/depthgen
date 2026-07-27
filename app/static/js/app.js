@@ -283,6 +283,8 @@ for (const k of [...RANGES, ...CHECKS, ...SELECTS, 'tiles', 'model']) {
 // ---------- presety i zapamiętywanie ustawień ----------
 const ALL = [...RANGES, ...CHECKS, ...SELECTS, 'tiles'];
 const DEFAULTS = Object.fromEntries(ALL.map(k => [k, $(k).type === 'checkbox' ? $(k).checked : $(k).value]));
+// 'model' nie jest zwykłą kontrolką (opcje dochodzą z serwera), ale preset może go ustawić
+const SETTABLE = [...ALL, 'model'];
 
 const PRESETS = {
   portret:   { gamma: 0.9, contrast: 0.2, detail: 0.5, detail_radius: 8, detail_guard: 0.7,
@@ -303,16 +305,34 @@ const PRESETS = {
                relief_mm: 8, base_mm: 2 },
   litofania: { invert: true, gamma: 1, contrast: 0, detail: 0.25, micro: 0.5, micro_radius: 1.5,
                relief_mm: 2.5, base_mm: 0.6, solid: true, median: '0', clip_low: 0, clip_high: 100 },
+  brelok:    { model: 'dav2-large', input_size: 1278, tiles: '4', tile_blend: 1.0,
+               invert: false, clip_low: 4.3, clip_high: 100, gamma: 2.42, contrast: 1.0,
+               median: '5', bilateral: 5, smooth: 0, detail: 1.85, detail_radius: 16.5,
+               detail_guard: 1.0, detail_clamp: 0.135, micro: 0.18, micro_radius: 1.1,
+               floor: 0.14, floor_soft: 0.175, edge_falloff: 0.30, shape: 'rect',
+               corner: 0.15, margin: 0.06, trim: true,
+               alpha_cut: false, alpha_threshold: 0.11, alpha_grow: 0,
+               cut_level: 0.01, min_island: 1.7,
+               resolution: 560, width_mm: 100, relief_mm: 14.3, base_mm: 0.0,
+               solid: true, exres: 1200 },
 };
 
 function apply(vals) {
+  let needsNet = false;
   for (const [k, v] of Object.entries(vals)) {
     const el = $(k);
-    if (!el) continue;
+    if (!el || !SETTABLE.includes(k)) continue;
+    const before = el.type === 'checkbox' ? el.checked : el.value;
     if (el.type === 'checkbox') el.checked = !!v; else el.value = v;
+    const after = el.type === 'checkbox' ? el.checked : el.value;
     label(k);
+    if (String(before) !== String(after) && (DEPTH_ONLY.has(k) || k === 'model')) needsNet = true;
   }
   save();
+  if ($('model')) localStorage.setItem('depthgen_model', $('model').value);
+  // preset zmieniający model albo kafle wymaga ponownego policzenia sieci,
+  // sama przebudowa siatki tego nie załatwi
+  if (needsNet) needsDepth(true);
   schedule(30);
 }
 
@@ -336,7 +356,12 @@ function restore() {
 
 $('preset').addEventListener('change', e => {
   const p = PRESETS[e.target.value];
-  if (p) apply({ ...DEFAULTS, ...p });
+  if (!p) return;
+  // Czyszczenie JPEG i upscaling zależą od konkretnego pliku, a nie od tego,
+  // co z niego robimy — preset ich nie rusza, jeśli sam ich nie ustala.
+  const base = { ...DEFAULTS };
+  for (const k of PREP) if (!(k in p)) delete base[k];
+  apply({ ...base, ...p });
 });
 $('reset').addEventListener('click', () => { $('preset').value = ''; apply(DEFAULTS); });
 

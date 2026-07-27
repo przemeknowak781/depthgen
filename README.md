@@ -120,7 +120,15 @@ Można też zapisać samą mapę wysokości jako 16-bitowy PNG (do ZBrush, Blend
 ## Presety
 
 `Portret`, `Maksymalny detal`, `Logo / grafika płaska`, `Krajobraz`, `Medalion owalny`,
-`Wycinanka PNG`, `Litofania`. Ustawienia zapisują się w przeglądarce między sesjami.
+`Wycinanka PNG`, `Brelok`, `Litofania`. Ustawienia zapisują się w przeglądarce między sesjami.
+
+`Brelok` to gotowy zestaw na sam relief bez płyty: Depth Anything Large przy 1278 px,
+kafle 4×4, mocna krzywa (gamma 2,42 + pełny kontrast) i ostre wyostrzenie na dużym
+promieniu, a bryła cięta progiem wysokości 0,01 z odsianiem wysepek poniżej 1,7%.
+Baza 0 mm daje płaski tył, więc grubość to sam relief — 14,3 mm przy szerokości 100 mm.
+
+Presety **nie ruszają** ustawień z sekcji „Czyszczenie i upscaling" — te zależą od
+konkretnego pliku, a nie od tego, co z niego robimy.
 
 ## Podgląd 3D
 
